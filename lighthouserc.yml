@@ -1,0 +1,15 @@
+ci:
+  collect:
+    url:
+      - https://pub.dev
+      - https://pub.dev/packages/camera
+      - https://pub.dev/packages/sentry_flutter/changelog
+      - https://pub.dev/packages?q=has%3Ascreenshot+camera
+      - https://pub.dev/packages/retry/example
+      - https://pub.dev/packages/url_launcher/install
+      - https://pub.dev/packages/provider/versions
+      - https://pub.dev/packages/collection/score
+      - https://pub.dev/publishers/flutter.dev/packages
+  upload:
+    target: 'temporary-public-storage'
+
