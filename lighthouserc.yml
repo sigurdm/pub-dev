@@ -10,6 +10,7 @@ ci:
       - https://pub.dev/packages/provider/versions
       - https://pub.dev/packages/collection/score
       - https://pub.dev/publishers/flutter.dev/packages
+      - https://pub.dev/documentation/win32/latest/
   upload:
     target: 'temporary-public-storage'
 
