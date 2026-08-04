@@ -1641,5 +1641,103 @@ void main() {
         );
       },
     );
+
+    testWithProfile(
+      'concurrent upload TOCTOU rejects non-uploader upload to newly created package',
+      fn: () async {
+        final pkgName = 'race_pkg';
+        final attackerBytes = await packageArchiveBytes(
+          pubspecContent: generatePubspecYaml(pkgName, '9.9.9'),
+        );
+        final victimBytes = await packageArchiveBytes(
+          pubspecContent: generatePubspecYaml(pkgName, '1.0.0'),
+        );
+
+        var hookTriggered = false;
+        packageBackend.onBeforeUploadTransaction = (package) async {
+          if (package == pkgName && !hookTriggered) {
+            hookTriggered = true;
+            packageBackend.onBeforeUploadTransaction = null;
+            // Victim creates the package while attacker is between pre-auth and tx.
+            final victimResult = await createPubApiClient(
+              authToken: adminClientToken,
+            ).uploadPackageBytes(victimBytes);
+            expect(
+              victimResult.success.message,
+              contains('Successfully uploaded'),
+            );
+          }
+        };
+
+        // Attacker starts upload while the package does not exist.
+        final attackerRs = createPubApiClient(
+          authToken: userClientToken,
+        ).uploadPackageBytes(attackerBytes);
+
+        await expectApiException(
+          attackerRs,
+          status: 403,
+          code: 'InsufficientPermissions',
+          message:
+              'user@pub.dev` has insufficient permissions to upload new versions to existing package `race_pkg`.',
+        );
+
+        expect(hookTriggered, isTrue);
+
+        final pkgKey = dbService.emptyKey.append(Package, id: pkgName);
+        final package = (await dbService.lookup<Package>([pkgKey])).single!;
+        final versions = await dbService
+            .query<PackageVersion>(ancestorKey: package.key)
+            .run()
+            .toList();
+
+        expect(versions.map((v) => v.version).toSet(), {'1.0.0'});
+        expect(package.latestVersion, '1.0.0');
+      },
+    );
+
+    testWithProfile(
+      'concurrent upload by authorized uploader succeeds and attaches both versions',
+      fn: () async {
+        final pkgName = 'benign_race_pkg';
+        final v1Bytes = await packageArchiveBytes(
+          pubspecContent: generatePubspecYaml(pkgName, '1.0.0'),
+        );
+        final v2Bytes = await packageArchiveBytes(
+          pubspecContent: generatePubspecYaml(pkgName, '1.0.1'),
+        );
+
+        var hookTriggered = false;
+        packageBackend.onBeforeUploadTransaction = (package) async {
+          if (package == pkgName && !hookTriggered) {
+            hookTriggered = true;
+            packageBackend.onBeforeUploadTransaction = null;
+            // The same admin user creates the package with 1.0.0.
+            final v1Result = await createPubApiClient(
+              authToken: adminClientToken,
+            ).uploadPackageBytes(v1Bytes);
+            expect(v1Result.success.message, contains('Successfully uploaded'));
+          }
+        };
+
+        // Request 2 (v1.0.1) started when package did not exist, but finishes after v1.0.0 is created.
+        final v2Result = await createPubApiClient(
+          authToken: adminClientToken,
+        ).uploadPackageBytes(v2Bytes);
+        expect(v2Result.success.message, contains('Successfully uploaded'));
+
+        expect(hookTriggered, isTrue);
+
+        final pkgKey = dbService.emptyKey.append(Package, id: pkgName);
+        final package = (await dbService.lookup<Package>([pkgKey])).single!;
+        final versions = await dbService
+            .query<PackageVersion>(ancestorKey: package.key)
+            .run()
+            .toList();
+
+        expect(versions.map((v) => v.version).toSet(), {'1.0.0', '1.0.1'});
+        expect(package.latestVersion, '1.0.1');
+      },
+    );
   });
 }

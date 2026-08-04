@@ -105,6 +105,9 @@ class PackageBackend {
   @visibleForTesting
   int maxVersionsPerPackage = _defaultMaxVersionsPerPackage;
 
+  @visibleForTesting
+  Future<void> Function(String package)? onBeforeUploadTransaction;
+
   PackageBackend(
     this.db,
     this._storage,
@@ -1360,6 +1363,7 @@ class PackageBackend {
       package: newVersion.package,
       isNew: isNew,
     );
+    var isPackageCreated = false;
     Package? package;
     final existingVersions = await db
         .query<PackageVersion>(ancestorKey: newVersion.packageKey!)
@@ -1370,6 +1374,10 @@ class PackageBackend {
       versionKey: newVersion.qualifiedVersionKey,
       changelogContent: entities.changelogAsset?.textContent,
     );
+
+    if (onBeforeUploadTransaction != null) {
+      await onBeforeUploadTransaction!(newVersion.package);
+    }
 
     // Add the new package to the repository by storing the tarball and
     // inserting metadata to datastore (which happens atomically).
@@ -1389,15 +1397,6 @@ class PackageBackend {
         throw PackageRejectedException.nameReserved(newVersion.package);
       }
 
-      if (isNew) {
-        final reservedPackage = await tx.lookupOrNull<ReservedPackage>(
-          db.emptyKey.append(ReservedPackage, id: newVersion.package),
-        );
-        if (reservedPackage != null) {
-          tx.delete(reservedPackage.key);
-        }
-      }
-
       // If the version already exists, we fail.
       if (version != null) {
         _logger.info(
@@ -1411,9 +1410,30 @@ class PackageBackend {
       }
 
       // If the package does not exist, then we create a new package.
-      if (package == null) {
+      isPackageCreated = package == null;
+      if (isPackageCreated) {
+        final reservedPackage = await tx.lookupOrNull<ReservedPackage>(
+          db.emptyKey.append(ReservedPackage, id: newVersion.package),
+        );
+        if (reservedPackage != null) {
+          tx.delete(reservedPackage.key);
+        }
         _logger.info('New package uploaded. [new-package-uploaded]');
         package = Package.fromVersion(newVersion);
+      } else {
+        await _requireUploadAuthorization(agent, package, newVersion.version!);
+      }
+
+      var txUploaderEmails = uploaderEmails;
+      var txExistingVersions = existingVersions;
+      if (isNew && !isPackageCreated) {
+        txUploaderEmails = await _listAdminNotificationEmailsForPackage(
+          package!,
+        );
+        txExistingVersions = await db
+            .query<PackageVersion>(ancestorKey: newVersion.packageKey!)
+            .run()
+            .toList();
       }
 
       final maxVersionCount =
@@ -1451,7 +1471,7 @@ class PackageBackend {
 
       // Keep the latest version in the package object up-to-date.
       package!.updateVersions(
-        [...existingVersions, newVersion],
+        [...txExistingVersions, newVersion],
         dartSdkVersion: currentDartSdk.semanticVersion,
         flutterSdkVersion: currentFlutterSdk.semanticVersion,
       );
@@ -1478,7 +1498,7 @@ class PackageBackend {
         packageName: newVersion.package,
         packageVersion: newVersion.version!,
         displayId: agent.displayId,
-        authorizedUploaders: uploaderEmails
+        authorizedUploaders: txUploaderEmails
             .map((email) => EmailAddress(email))
             .toList(),
         uploadMessages: uploadMessages,
@@ -1493,7 +1513,7 @@ class PackageBackend {
         ...entities.assets,
         if (activeConfiguration.isPublishedEmailNotificationEnabled)
           outgoingEmail,
-        if (isNew)
+        if (isPackageCreated)
           AuditLogRecord.packageCreated(
             uploader: agent,
             package: newVersion.package,
@@ -1526,7 +1546,7 @@ class PackageBackend {
     asyncQueue.addAsyncFn(
       () => _postUploadTasks(package, newVersion, outgoingEmail),
     );
-    if (isNew && agent is AuthenticatedUser) {
+    if (isPackageCreated && agent is AuthenticatedUser) {
       asyncQueue.addAsyncFn(
         () => cache.userUploaderOfPackages(agent.userId).purge(),
       );
