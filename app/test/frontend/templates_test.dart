@@ -807,9 +807,11 @@ void main() {
         final members = await publisherBackend.listPublisherMembers(
           'example.com',
         );
+        final hasPackages = await publisherBackend.hasPackages('example.com');
         final html = renderPublisherAdminPage(
           publisher: publisher,
           members: members,
+          hasPackages: hasPackages,
         );
         expectGoldenFile(
           html,

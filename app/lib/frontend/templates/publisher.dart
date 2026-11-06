@@ -147,6 +147,7 @@ String renderPublisherPackagesPage({
 String renderPublisherAdminPage({
   required PublisherRow publisher,
   required List<api.PublisherMember> members,
+  required bool hasPackages,
 }) {
   final tabs = <Tab>[
     _packagesLinkTab(publisher.publisherId),
@@ -157,6 +158,7 @@ String renderPublisherAdminPage({
       contentNode: publisherAdminPageNode(
         publisher: publisher,
         members: members,
+        hasPackages: hasPackages,
       ),
     ),
     _activityLogLinkTab(publisher.publisherId),

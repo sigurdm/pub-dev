@@ -610,6 +610,28 @@ class AuditLogRecord extends db.ExpandoModel<String> {
     );
   }
 
+  /// Returns [AuditLogRecord] for the publisher deleted operation.
+  ///
+  /// Throws [RateLimitException] when the configured rate limit is reached.
+  static Future<AuditLogRecord> publisherDeleted({
+    required String activeUserId,
+    required String? activeUserEmail,
+    required String publisherId,
+    required List<String> memberIds,
+  }) {
+    return _checkRateLimit(
+      AuditLogRecord._init()
+        ..kind = AuditLogRecordKind.publisherDeleted
+        ..agent = activeUserId
+        ..summary = '`$activeUserEmail` deleted publisher `$publisherId`.'
+        ..data = {'publisherId': publisherId, 'user': activeUserEmail}
+        ..users = {...memberIds, activeUserId}.toList()
+        ..packages = []
+        ..packageVersions = []
+        ..publishers = [publisherId],
+    );
+  }
+
   /// Returns [AuditLogRecord] for the publisher member invited operation.
   ///
   /// Throws [RateLimitException] when the configured rate limit is reached.
@@ -998,6 +1020,9 @@ abstract class AuditLogRecordKind {
 
   /// Event that a publisher was created.
   static const publisherCreated = 'publisher-created';
+
+  /// Event that a publisher was deleted.
+  static const publisherDeleted = 'publisher-deleted';
 
   /// Event that an e-mail was invited to be a publisher member.
   static const publisherMemberInvited = 'publisher-member-invited';

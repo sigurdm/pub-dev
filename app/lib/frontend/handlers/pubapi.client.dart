@@ -242,6 +242,13 @@ class PubApiClient {
     );
   }
 
+  Future<List<int>> deletePublisher(String publisherId) async {
+    return await _client.requestBytes(
+      verb: 'delete',
+      path: '/api/publishers/$publisherId',
+    );
+  }
+
   Future<_i4.Consent> consentInfo(String consentId) async {
     return _i4.Consent.fromJson(
       await _client.requestJson(

@@ -175,6 +175,7 @@ Future<shelf.Response> publisherAdminPageHandler(
     renderPublisherAdminPage(
       publisher: publisher,
       members: await publisherBackend.listPublisherMembers(publisherId),
+      hasPackages: await publisherBackend.hasPackages(publisherId),
     ),
   );
 }

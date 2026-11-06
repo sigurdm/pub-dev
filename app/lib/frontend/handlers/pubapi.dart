@@ -292,6 +292,13 @@ class PubApi {
     return jsonResponse({'status': 'OK'});
   }
 
+  /// Deletes an empty publisher.
+  @EndPoint.delete('/api/publishers/<publisherId>')
+  Future<Response> deletePublisher(Request request, String publisherId) async {
+    await publisherBackend.deletePublisher(publisherId);
+    return jsonResponse({'status': 'OK'});
+  }
+
   // ****
   // **** Account, authentication and user administration API
   // ****

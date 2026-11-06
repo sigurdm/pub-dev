@@ -12,6 +12,7 @@ import '../../../dom/material.dart' as material;
 d.Node publisherAdminPageNode({
   required PublisherRow publisher,
   required List<api.PublisherMember> members,
+  required bool hasPackages,
 }) {
   return d.fragment([
     d.h2(text: 'Publisher information'),
@@ -118,6 +119,29 @@ d.Node publisherAdminPageNode({
           ),
         ),
       ],
+    ),
+    d.h2(text: 'Delete publisher'),
+    if (hasPackages)
+      d.p(
+        text:
+            'This publisher cannot be deleted because it owns packages. '
+            'A publisher can only be deleted when it has no packages.',
+      )
+    else
+      d.p(
+        text:
+            'Deleting this publisher will permanently remove it and all its '
+            'member associations.',
+      ),
+    d.div(
+      classes: ['-pub-form-right-aligned'],
+      child: material.button(
+        id: '-publisher-delete-button',
+        classes: ['pub-button-danger'],
+        label: 'Delete publisher',
+        raised: true,
+        disabled: hasPackages,
+      ),
     ),
   ]);
 }

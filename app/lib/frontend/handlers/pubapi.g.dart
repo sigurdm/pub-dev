@@ -341,6 +341,19 @@ Router _$PubApiRouter(PubApi service) {
       return $utilities.unhandledError(e, st);
     }
   });
+  router.add('DELETE', r'/api/publishers/<publisherId>', (
+    Request request,
+    String publisherId,
+  ) async {
+    try {
+      final _$result = await service.deletePublisher(request, publisherId);
+      return _$result;
+    } on ApiResponseException catch (e) {
+      return e.asApiResponse();
+    } catch (e, st) {
+      return $utilities.unhandledError(e, st);
+    }
+  });
   router.add('GET', r'/api/account/consent/<consentId>', (
     Request request,
     String consentId,

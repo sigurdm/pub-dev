@@ -10,6 +10,7 @@ d.Node button({
   Iterable<String>? classes,
   bool raised = false,
   bool unelevated = false,
+  bool disabled = false,
   Map<String, String>? attributes,
   d.Image? icon,
   required String label,
@@ -23,7 +24,7 @@ d.Node button({
       if (unelevated) 'pub-button--unelevated',
       ...?classes,
     ],
-    attributes: attributes,
+    attributes: {if (disabled) 'disabled': 'disabled', ...?attributes},
     children: [
       if (icon != null)
         d.img(

@@ -21,6 +21,7 @@ import '../account/consent_backend.dart';
 import '../audit/backend.dart';
 import '../audit/models.dart';
 import '../frontend/request_context.dart';
+import '../package/models.dart';
 import '../service/email/email_templates.dart';
 import '../shared/datastore.dart';
 import '../shared/exceptions.dart';
@@ -800,6 +801,62 @@ class PublisherBackend {
     }
     await purgePublisherCache(publisherId);
     await purgeAccountCache(userId: userId);
+  }
+
+  /// Whether [publisherId] owns any packages (including unlisted or moderated
+  /// packages).
+  Future<bool> hasPackages(String publisherId) async {
+    checkPublisherIdParam(publisherId);
+    final query = _db.query<Package>()
+      ..filter('publisherId =', publisherId)
+      ..limit(1);
+    return !(await query.run().isEmpty);
+  }
+
+  /// Deletes an empty publisher.
+  Future<void> deletePublisher(String publisherId) async {
+    checkPublisherIdParam(publisherId);
+    final authenticatedUser = await requireAuthenticatedWebUser();
+    final user = authenticatedUser.user;
+    await requirePublisherAdmin(publisherId, user.userId);
+
+    if (await hasPackages(publisherId)) {
+      throw ConflictException.publisherHasPackages(publisherId);
+    }
+
+    final publisherKey = _publisherKey(publisherId);
+    final memberRows = await _listMemberRows(publisherId);
+    final memberIds = memberRows.map((m) => m.userId).toList();
+    final auditLogRecord = await AuditLogRecord.publisherDeleted(
+      publisherId: publisherId,
+      activeUserId: user.userId,
+      activeUserEmail: user.email,
+      memberIds: memberIds,
+    );
+    var deleted = false;
+    await withRetryTransaction(_db, (tx) async {
+      final publisher = await tx.lookupOrNull<Publisher>(publisherKey);
+      if (publisher == null) {
+        return;
+      }
+      final members = await tx
+          .query<PublisherMember>(publisherKey)
+          .run()
+          .toList();
+      deleted = true;
+      tx.queueMutations(
+        inserts: [auditLogRecord],
+        deletes: [publisherKey, ...members.map((m) => m.key)],
+      );
+    });
+    if (deleted) {
+      await auditBackend.migrateToSql(auditLogRecord);
+    }
+    await mirrorPublisherToSql(publisherId);
+    await purgePublisherCache(publisherId);
+    for (final userId in memberIds) {
+      await purgeAccountCache(userId: userId);
+    }
   }
 
   /// A callback from consent backend, when a consent is granted.

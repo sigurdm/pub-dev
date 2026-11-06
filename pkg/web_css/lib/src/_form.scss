@@ -310,6 +310,15 @@
     background-color: var(--pub-button-cancel-background);
     color: var(--pub-button-cancel-text-color);
   }
+
+  &:disabled {
+    background-color: var(--pub-button-cancel-background);
+    color: var(--pub-button-cancel-text-color);
+    opacity: 0.6;
+    cursor: default;
+    box-shadow: none;
+    pointer-events: none;
+  }
 }
 
 .pub-fab {

@@ -626,6 +626,12 @@ class ConflictException extends ResponseException {
       ConflictException._(
         'A publisher with the domain `$domain` already exists',
       );
+
+  /// The user is trying to delete a publisher that still owns packages.
+  factory ConflictException.publisherHasPackages(String publisherId) =>
+      ConflictException._(
+        'Publisher `$publisherId` cannot be deleted because it owns packages.',
+      );
 }
 
 /// Thrown when package or versions is missing or has flags indicating that it

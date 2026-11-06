@@ -142,5 +142,56 @@ void main() {
         );
       },
     );
+
+    testWithProfile(
+      'publisher admin page delete button disabled when publisher has packages',
+      fn: () async {
+        final cookies = await acquireSessionCookies('admin@pub.dev');
+        await expectHtmlResponse(
+          await issueGet(
+            '/publishers/example.com/admin',
+            headers: {'cookie': cookies},
+          ),
+          present: [
+            '<h2>Delete publisher</h2>',
+            'This publisher cannot be deleted because it owns packages.',
+            'id="-publisher-delete-button"',
+            'disabled="disabled"',
+          ],
+        );
+      },
+    );
+
+    testWithProfile(
+      'publisher admin page delete button enabled when publisher is empty',
+      testProfile: TestProfile(
+        generatedPackages: [],
+        publishers: [
+          TestPublisher(
+            name: 'verified.com',
+            members: [TestMember(email: 'admin@pub.dev', role: 'admin')],
+          ),
+        ],
+        defaultUser: 'admin@pub.dev',
+      ),
+      fn: () async {
+        final cookies = await acquireSessionCookies('admin@pub.dev');
+        await expectHtmlResponse(
+          await issueGet(
+            '/publishers/verified.com/admin',
+            headers: {'cookie': cookies},
+          ),
+          present: [
+            '<h2>Delete publisher</h2>',
+            'Deleting this publisher will permanently remove it and all its member associations.',
+            'id="-publisher-delete-button"',
+          ],
+          absent: [
+            'This publisher cannot be deleted because it owns packages.',
+            'disabled="disabled"',
+          ],
+        );
+      },
+    );
   });
 }

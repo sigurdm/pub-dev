@@ -454,6 +454,7 @@ class _CreatePublisherWidget {
 /// Active on the `/publishers/<publisherId>/admin` page.
 class _PublisherAdminWidget {
   Element? _updateButton;
+  Element? _deleteButton;
   HTMLTextAreaElement? _descriptionTextArea;
   HTMLInputElement? _websiteUrlInput;
   HTMLInputElement? _contactEmailInput;
@@ -465,6 +466,7 @@ class _PublisherAdminWidget {
   void init() {
     if (!pageData.isPublisherPage) return;
     _updateButton = document.getElementById('-publisher-update-button');
+    _deleteButton = document.getElementById('-publisher-delete-button');
     _descriptionTextArea =
         document.getElementById('-publisher-description')
             as HTMLTextAreaElement?;
@@ -480,6 +482,7 @@ class _PublisherAdminWidget {
     _addMemberContent = document.getElementById('-admin-add-member-content');
     _originalContactEmail = _contactEmailInput?.value;
     _updateButton?.onClick.listen((_) => _updatePublisher());
+    _deleteButton?.onClick.listen((_) => _deletePublisher());
     _addMemberButton?.onClick.listen((_) => _addMember());
     if (_addMemberContent != null) {
       _addMemberContent!.remove();
@@ -569,6 +572,26 @@ class _PublisherAdminWidget {
       successMessage:
           '`$email` removed from this publisher. The page will reload.',
       onSuccess: (_) => window.location.reload(),
+    );
+  }
+
+  Future<void> _deletePublisher() async {
+    if (_deleteButton is HTMLButtonElement &&
+        (_deleteButton as HTMLButtonElement).disabled) {
+      return;
+    }
+    final publisherId = pageData.publisher!.publisherId;
+    await api_client.rpc<void>(
+      confirmQuestion:
+          'Are you sure you want to delete publisher `$publisherId`? '
+          'This will permanently remove the publisher and all its member associations.',
+      fn: () async {
+        await api_client.client.deletePublisher(publisherId);
+      },
+      successMessage: 'Publisher `$publisherId` was deleted.',
+      onSuccess: (_) {
+        window.location.pathname = '/my-publishers';
+      },
     );
   }
 }

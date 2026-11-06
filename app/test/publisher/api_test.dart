@@ -16,7 +16,9 @@ import 'package:pub_dev/database/schema.dart';
 import 'package:pub_dev/fake/backend/fake_auth_provider.dart';
 import 'package:pub_dev/fake/backend/fake_email_sender.dart';
 import 'package:pub_dev/frontend/handlers/pubapi.client.dart';
+import 'package:pub_dev/publisher/backend.dart';
 import 'package:pub_dev/publisher/models.dart';
+import 'package:pub_dev/tool/test_profile/models.dart';
 import 'package:test/test.dart';
 import 'package:typed_sql/typed_sql.dart' hide Query;
 
@@ -987,6 +989,106 @@ void main() {
             contains(
               '`admin@pub.dev` removed `other@pub.dev` from publisher `example.com`.',
             ),
+          );
+        },
+      );
+    });
+
+    group('Delete publisher', () {
+      _testAdminAuthIssues((client) async {
+        return await client.deletePublisher('example.com');
+      });
+
+      _testNoPublisher((client) async {
+        return await client.deletePublisher('no-domain.net');
+      });
+
+      testWithProfile(
+        'Cannot delete publisher with packages',
+        fn: () async {
+          final client = await createFakeAuthPubApiClient(
+            email: adminAtPubDevEmail,
+          );
+          final rs = client.deletePublisher('example.com');
+          await expectApiException(
+            rs,
+            status: 409,
+            code: 'RequestConflict',
+            message:
+                'Publisher `example.com` cannot be deleted because it owns packages.',
+          );
+          expect(
+            await publisherBackend.lookupPublisher('example.com'),
+            isNotNull,
+          );
+        },
+      );
+
+      testWithProfile(
+        'OK: delete empty publisher',
+        testProfile: TestProfile(
+          generatedPackages: [],
+          publishers: [
+            TestPublisher(
+              name: 'verified.com',
+              members: [TestMember(email: 'admin@pub.dev', role: 'admin')],
+            ),
+          ],
+          defaultUser: 'admin@pub.dev',
+        ),
+        fn: () async {
+          final adminUser = await accountBackend.lookupUserByEmail(
+            'admin@pub.dev',
+          );
+          final otherUser = await withFakeAuthRequestContext(
+            'other@pub.dev',
+            () => requireAuthenticatedWebUser(),
+          );
+          await dbService.commit(
+            inserts: [
+              publisherMember(otherUser.userId, 'verified.com', 'admin'),
+            ],
+          );
+
+          final client = await createFakeAuthPubApiClient(
+            email: adminAtPubDevEmail,
+          );
+          final rs = await client.deletePublisher('verified.com');
+          expect(json.fuse(utf8).decode(rs), {'status': 'OK'});
+
+          // Publisher should be gone from Datastore and SQL.
+          expect(
+            await publisherBackend.lookupPublisher('verified.com'),
+            isNull,
+          );
+          await expectPublisherInSqlMatchesDatastore('verified.com');
+          await expectApiException(
+            client.publisherInfo('verified.com'),
+            status: 404,
+            code: 'NotFound',
+          );
+
+          // Audit log record should be recorded for publisher and both members.
+          final publisherAudit = await auditBackend.listRecordsForPublisher(
+            'verified.com',
+          );
+          expect(
+            publisherAudit.records.map((e) => e.summary),
+            contains('`admin@pub.dev` deleted publisher `verified.com`.'),
+          );
+          final adminAudit = await auditBackend.listRecordsForUserId(
+            adminUser.userId,
+          );
+          expect(
+            adminAudit.records.map((e) => e.summary),
+            contains('`admin@pub.dev` deleted publisher `verified.com`.'),
+          );
+          final otherAudit = await auditBackend.listRecordsForUserId(
+            otherUser.userId,
+          );
+          expect(
+            otherAudit.records.map((e) => e.summary),
+            contains('`admin@pub.dev` deleted publisher `verified.com`.'),
           );
         },
       );
