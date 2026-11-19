@@ -3,8 +3,12 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:_pub_shared/data/publisher_api.dart' as api;
+import 'package:_pub_shared/search/search_form.dart';
+import 'package:_pub_shared/search/tags.dart';
 
 import '../../../../database/schema.dart' show PublisherRow;
+import '../../../../package/models.dart' show Package;
+import '../../../../shared/urls.dart' as urls;
 import '../../../dom/dom.dart' as d;
 import '../../../dom/material.dart' as material;
 
@@ -12,8 +16,11 @@ import '../../../dom/material.dart' as material;
 d.Node publisherAdminPageNode({
   required PublisherRow publisher,
   required List<api.PublisherMember> members,
-  required bool hasPackages,
+  required List<Package> packages,
+  required bool hasMorePackages,
 }) {
+  final hasPackages = packages.isNotEmpty || hasMorePackages;
+  final hasNonVisiblePackages = packages.any((p) => p.isNotVisible);
   return d.fragment([
     d.h2(text: 'Publisher information'),
     d.div(
@@ -121,13 +128,60 @@ d.Node publisherAdminPageNode({
       ],
     ),
     d.h2(text: 'Delete publisher'),
-    if (hasPackages)
+    if (hasPackages) ...[
       d.p(
         text:
             'This publisher cannot be deleted because it owns packages. '
             'A publisher can only be deleted when it has no packages.',
-      )
-    else
+      ),
+      d.p(
+        children: [
+          d.text('To transfer a package out of this publisher, open its '),
+          d.strong(text: 'Admin'),
+          d.text(
+            ' page and select another verified publisher that you are a member '
+            'of under ',
+          ),
+          d.strong(text: 'Package ownership'),
+          d.text(' (you can '),
+          d.a(href: urls.createPublisherUrl(), text: 'create a new publisher'),
+          d.text(
+            ' if needed; packages cannot be converted back to legacy uploader '
+            'ownership).',
+          ),
+        ],
+      ),
+      if (packages.isNotEmpty) ...[
+        d.p(text: 'Packages currently owned by this publisher:'),
+        d.ul(
+          children: [for (final package in packages) _packageListItem(package)],
+        ),
+      ],
+      if (hasMorePackages)
+        d.p(
+          children: [
+            d.text('And more packages. '),
+            d.a(
+              href: SearchForm()
+                  .toggleRequiredTag(
+                    PackageTags.publisherTag(publisher.publisherId),
+                  )
+                  .toggleRequiredTag(PackageTags.showHidden)
+                  .toSearchLink(),
+              rel: 'nofollow',
+              text: 'View all packages owned by this publisher',
+            ),
+            d.text('.'),
+          ],
+        ),
+      if (hasNonVisiblePackages)
+        d.p(
+          text:
+              'Moderated or deleted packages cannot be transferred by '
+              'publisher members. Wait for moderation or deletion to '
+              'complete, or contact pub.dev support if you need assistance.',
+        ),
+    ] else
       d.p(
         text:
             'Deleting this publisher will permanently remove it and all its '
@@ -144,4 +198,31 @@ d.Node publisherAdminPageNode({
       ),
     ),
   ]);
+}
+
+d.Node _packageListItem(Package package) {
+  final name = package.name!;
+  final statuses = <String>[
+    if (package.isModerated) 'moderated',
+    if (package.isAdminDeleted) 'deleted',
+    if (package.isVisible && package.isDiscontinued) 'discontinued',
+    if (package.isVisible && package.isUnlisted) 'unlisted',
+  ];
+  final statusSuffix = statuses.isEmpty ? '' : ' (${statuses.join(', ')})';
+  if (package.isNotVisible) {
+    return d.li(
+      children: [
+        d.code(text: name),
+        if (statusSuffix.isNotEmpty) d.text(statusSuffix),
+      ],
+    );
+  }
+  return d.li(
+    children: [
+      d.a(href: urls.pkgPageUrl(name), text: name),
+      if (statusSuffix.isNotEmpty) d.text(statusSuffix),
+      d.text(' — '),
+      d.a(href: urls.pkgAdminUrl(name), text: 'Admin'),
+    ],
+  );
 }

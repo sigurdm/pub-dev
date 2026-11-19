@@ -1093,6 +1093,59 @@ void main() {
         },
       );
     });
+
+    group('List publisher packages', () {
+      testWithProfile(
+        'empty publisher',
+        testProfile: TestProfile(
+          generatedPackages: [],
+          publishers: [
+            TestPublisher(
+              name: 'verified.com',
+              members: [TestMember(email: 'admin@pub.dev', role: 'admin')],
+            ),
+          ],
+          defaultUser: 'admin@pub.dev',
+        ),
+        fn: () async {
+          final (:packages, :hasMore) = await publisherBackend
+              .listPackagesForPublisher('verified.com');
+          expect(packages, isEmpty);
+          expect(hasMore, isFalse);
+        },
+      );
+
+      testWithProfile(
+        'sorted packages and limit cap',
+        testProfile: TestProfile(
+          generatedPackages: [
+            GeneratedTestPackage(name: 'pkg_c', publisher: 'example.com'),
+            GeneratedTestPackage(name: 'pkg_a', publisher: 'example.com'),
+            GeneratedTestPackage(name: 'pkg_b', publisher: 'example.com'),
+          ],
+          defaultUser: 'admin@pub.dev',
+        ),
+        fn: () async {
+          final all = await publisherBackend.listPackagesForPublisher(
+            'example.com',
+            limit: 3,
+          );
+          expect(all.packages.map((p) => p.name).toList(), [
+            'pkg_a',
+            'pkg_b',
+            'pkg_c',
+          ]);
+          expect(all.hasMore, isFalse);
+
+          final capped = await publisherBackend.listPackagesForPublisher(
+            'example.com',
+            limit: 2,
+          );
+          expect(capped.packages.length, 2);
+          expect(capped.hasMore, isTrue);
+        },
+      );
+    });
   });
 }
 

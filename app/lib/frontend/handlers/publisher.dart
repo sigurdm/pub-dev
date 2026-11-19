@@ -171,11 +171,15 @@ Future<shelf.Response> publisherAdminPageHandler(
     return htmlResponse(renderUnauthorizedPage(), status: 403);
   }
 
+  final (:packages, :hasMore) = await publisherBackend.listPackagesForPublisher(
+    publisherId,
+  );
   return htmlResponse(
     renderPublisherAdminPage(
       publisher: publisher,
       members: await publisherBackend.listPublisherMembers(publisherId),
-      hasPackages: await publisherBackend.hasPackages(publisherId),
+      packages: packages,
+      hasMorePackages: hasMore,
     ),
   );
 }

@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'package:pub_dev/package/models.dart';
 import 'package:pub_dev/publisher/backend.dart';
 import 'package:pub_dev/publisher/models.dart';
 import 'package:pub_dev/shared/datastore.dart';
@@ -155,10 +156,94 @@ void main() {
           present: [
             '<h2>Delete publisher</h2>',
             'This publisher cannot be deleted because it owns packages.',
+            'To transfer a package out of this publisher',
+            'href="/create-publisher"',
+            'Packages currently owned by this publisher:',
+            'href="/packages/neon"',
+            'href="/packages/neon/admin"',
             'id="-publisher-delete-button"',
             'disabled="disabled"',
           ],
+          absent: [
+            'And more packages.',
+            'Moderated or deleted packages cannot be transferred',
+          ],
         );
+      },
+    );
+
+    testWithProfile(
+      'publisher admin page lists unlisted, discontinued, and moderated packages',
+      testProfile: TestProfile(
+        generatedPackages: [
+          GeneratedTestPackage(name: 'pkg_active', publisher: 'example.com'),
+          GeneratedTestPackage(
+            name: 'pkg_discontinued',
+            publisher: 'example.com',
+            isDiscontinued: true,
+          ),
+          GeneratedTestPackage(
+            name: 'pkg_unlisted',
+            publisher: 'example.com',
+            isUnlisted: true,
+          ),
+          GeneratedTestPackage(name: 'pkg_moderated', publisher: 'example.com'),
+        ],
+        defaultUser: 'admin@pub.dev',
+      ),
+      fn: () async {
+        final moderated = await dbService.lookupValue<Package>(
+          dbService.emptyKey.append(Package, id: 'pkg_moderated'),
+        );
+        moderated.updateIsModerated(isModerated: true);
+        await dbService.commit(inserts: [moderated]);
+
+        final cookies = await acquireSessionCookies('admin@pub.dev');
+        await expectHtmlResponse(
+          await issueGet(
+            '/publishers/example.com/admin',
+            headers: {'cookie': cookies},
+          ),
+          present: [
+            '<li><a href="/packages/pkg_active">pkg_active</a> — <a href="/packages/pkg_active/admin">Admin</a></li>',
+            '<li><a href="/packages/pkg_discontinued">pkg_discontinued</a> (discontinued) — <a href="/packages/pkg_discontinued/admin">Admin</a></li>',
+            '<li><code>pkg_moderated</code> (moderated)</li>',
+            '<li><a href="/packages/pkg_unlisted">pkg_unlisted</a> (unlisted) — <a href="/packages/pkg_unlisted/admin">Admin</a></li>',
+            'Moderated or deleted packages cannot be transferred by publisher members.',
+          ],
+          absent: ['href="/packages/pkg_moderated/admin"'],
+        );
+      },
+    );
+
+    testWithProfile(
+      'publisher admin page caps listed packages and shows view all link',
+      testProfile: TestProfile(
+        generatedPackages: [
+          for (var i = 1; i <= 21; i++)
+            GeneratedTestPackage(
+              name: 'pkg_${i.toString().padLeft(2, '0')}',
+              publisher: 'example.com',
+            ),
+        ],
+        defaultUser: 'admin@pub.dev',
+      ),
+      fn: () async {
+        final cookies = await acquireSessionCookies('admin@pub.dev');
+        final body = await expectHtmlResponse(
+          await issueGet(
+            '/publishers/example.com/admin',
+            headers: {'cookie': cookies},
+          ),
+          present: [
+            'And more packages.',
+            'href="/packages?q=publisher%3Aexample.com+show%3Ahidden"',
+          ],
+        );
+        final listedPackages = RegExp(
+          r'href="/packages/pkg_\d\d/admin"',
+        ).allMatches(body);
+        expect(listedPackages.length, 20);
       },
     );
 
@@ -188,6 +273,8 @@ void main() {
           ],
           absent: [
             'This publisher cannot be deleted because it owns packages.',
+            'To transfer a package out of this publisher',
+            'Packages currently owned by this publisher:',
             'disabled="disabled"',
           ],
         );

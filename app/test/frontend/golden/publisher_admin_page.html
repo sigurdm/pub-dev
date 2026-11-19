@@ -224,6 +224,23 @@
                   </div>
                   <h2>Delete publisher</h2>
                   <p>This publisher cannot be deleted because it owns packages. A publisher can only be deleted when it has no packages.</p>
+                  <p>
+                    To transfer a package out of this publisher, open its
+                    <strong>Admin</strong>
+                    page and select another verified publisher that you are a member of under
+                    <strong>Package ownership</strong>
+                    (you can
+                    <a href="/create-publisher">create a new publisher</a>
+                    if needed; packages cannot be converted back to legacy uploader ownership).
+                  </p>
+                  <p>Packages currently owned by this publisher:</p>
+                  <ul>
+                    <li>
+                      <a href="/packages/neon">neon</a>
+                      —
+                      <a href="/packages/neon/admin">Admin</a>
+                    </li>
+                  </ul>
                   <div class="-pub-form-right-aligned">
                     <button id="-publisher-delete-button" class="pub-button pub-button--raised pub-button-danger" disabled="disabled">Delete publisher</button>
                   </div>

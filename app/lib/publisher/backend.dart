@@ -813,6 +813,28 @@ class PublisherBackend {
     return !(await query.run().isEmpty);
   }
 
+  /// Lists packages owned by [publisherId] (including unlisted, discontinued,
+  /// moderated, and admin-deleted packages), capped at [limit].
+  ///
+  /// The [limit] must be between 1 and 1000.
+  /// Returns `hasMore: true` when [publisherId] owns more than [limit]
+  /// packages.
+  Future<({List<Package> packages, bool hasMore})> listPackagesForPublisher(
+    String publisherId, {
+    int limit = 20,
+  }) async {
+    checkPublisherIdParam(publisherId);
+    RangeError.checkValueInInterval(limit, 1, 1000, 'limit');
+    final query = _db.query<Package>()
+      ..filter('publisherId =', publisherId)
+      ..limit(limit + 1);
+    final results = await query.run().toList();
+    final hasMore = results.length > limit;
+    final packages = (hasMore ? results.sublist(0, limit) : results)
+      ..sort((a, b) => a.name!.compareTo(b.name!));
+    return (packages: packages, hasMore: hasMore);
+  }
+
   /// Deletes an empty publisher.
   Future<void> deletePublisher(String publisherId) async {
     checkPublisherIdParam(publisherId);

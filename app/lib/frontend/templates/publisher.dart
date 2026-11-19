@@ -10,6 +10,7 @@ import 'package:_pub_shared/search/tags.dart';
 import '../../audit/models.dart';
 import '../../database/schema.dart' show PublisherRow, PublisherRowExt;
 import '../../frontend/templates/views/account/activity_log_table.dart';
+import '../../package/models.dart' show Package;
 import '../../package/search_adapter.dart' show SearchResultPage;
 import '../../publisher/models.dart';
 import '../../shared/urls.dart' as urls;
@@ -147,7 +148,8 @@ String renderPublisherPackagesPage({
 String renderPublisherAdminPage({
   required PublisherRow publisher,
   required List<api.PublisherMember> members,
-  required bool hasPackages,
+  required List<Package> packages,
+  required bool hasMorePackages,
 }) {
   final tabs = <Tab>[
     _packagesLinkTab(publisher.publisherId),
@@ -158,7 +160,8 @@ String renderPublisherAdminPage({
       contentNode: publisherAdminPageNode(
         publisher: publisher,
         members: members,
-        hasPackages: hasPackages,
+        packages: packages,
+        hasMorePackages: hasMorePackages,
       ),
     ),
     _activityLogLinkTab(publisher.publisherId),
