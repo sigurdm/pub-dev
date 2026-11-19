@@ -376,4 +376,129 @@ void main() {
       },
     );
   });
+
+  group('listRecordsForPublisher publisherCreatedAt scoping', () {
+    AuditLogRecord publisherRecord({
+      required String userId,
+      required String publisherId,
+      required String kind,
+      required String summary,
+      DateTime? created,
+      DateTime? expires,
+    }) {
+      final ts = created ?? clock.now().toUtc();
+      return AuditLogRecord()
+        ..id = createUuid()
+        ..created = ts
+        ..expires = expires ?? ts.add(Duration(days: 61))
+        ..kind = kind
+        ..agent = userId
+        ..summary = summary
+        ..data = {'publisherId': publisherId}
+        ..users = [userId]
+        ..packages = <String>[]
+        ..packageVersions = <String>[]
+        ..publishers = [publisherId];
+    }
+
+    testWithProfile(
+      'keeps publisher-created stamped slightly before Publisher.created',
+      fn: () async {
+        final user = await accountBackend.lookupUserByEmail(adminAtPubDevEmail);
+        final createdRecord = publisherRecord(
+          userId: user.userId,
+          publisherId: 'legacy.com',
+          kind: AuditLogRecordKind.publisherCreated,
+          summary: 'created',
+        );
+        await dbService.commit(inserts: [createdRecord]);
+        await auditBackend.migrateToSql(createdRecord);
+
+        // Simulate older code stamping Publisher.created 500ms after
+        // AuditLogRecord.publisherCreated.
+        final publisherCreatedAt = createdRecord.created!.add(
+          Duration(milliseconds: 500),
+        );
+        final page = await auditBackend.listRecordsForPublisher(
+          'legacy.com',
+          publisherCreatedAt: publisherCreatedAt,
+        );
+        expect(page.records.map((r) => r.recordId), [createdRecord.id]);
+      },
+    );
+
+    testWithProfile(
+      'excludes deletion and earlier records on immediate re-registration',
+      fn: () async {
+        final user = await accountBackend.lookupUserByEmail(adminAtPubDevEmail);
+        final oldCreated = publisherRecord(
+          userId: user.userId,
+          publisherId: 'reborn.com',
+          kind: AuditLogRecordKind.publisherCreated,
+          summary: 'old created',
+        );
+        await dbService.commit(inserts: [oldCreated]);
+        await auditBackend.migrateToSql(oldCreated);
+
+        final deleted = publisherRecord(
+          userId: user.userId,
+          publisherId: 'reborn.com',
+          kind: AuditLogRecordKind.publisherDeleted,
+          summary: 'deleted',
+          created: oldCreated.created!.add(Duration(seconds: 2)),
+        );
+        await dbService.commit(inserts: [deleted]);
+        await auditBackend.migrateToSql(deleted);
+
+        final newCreated = publisherRecord(
+          userId: user.userId,
+          publisherId: 'reborn.com',
+          kind: AuditLogRecordKind.publisherCreated,
+          summary: 'new created',
+          created: deleted.created!.add(Duration(milliseconds: 100)),
+        );
+        await dbService.commit(inserts: [newCreated]);
+        await auditBackend.migrateToSql(newCreated);
+
+        final page = await auditBackend.listRecordsForPublisher(
+          'reborn.com',
+          publisherCreatedAt: newCreated.created,
+        );
+        expect(page.records.map((r) => r.recordId), [newCreated.id]);
+      },
+    );
+
+    testWithProfile(
+      'excludes old permanent records when deletion record has expired',
+      fn: () async {
+        final user = await accountBackend.lookupUserByEmail(adminAtPubDevEmail);
+        final oldPublish = publisherRecord(
+          userId: user.userId,
+          publisherId: 'longago.com',
+          kind: AuditLogRecordKind.packagePublished,
+          summary: 'old publish',
+          expires: auditLogRecordExpiresInFarFuture,
+        );
+        await dbService.commit(inserts: [oldPublish]);
+        await auditBackend.migrateToSql(oldPublish);
+
+        // Simulate re-registration 90 days later after publisher-deleted expired.
+        clockControl.elapse(days: 90);
+        final newCreated = publisherRecord(
+          userId: user.userId,
+          publisherId: 'longago.com',
+          kind: AuditLogRecordKind.publisherCreated,
+          summary: 'new created',
+        );
+        await dbService.commit(inserts: [newCreated]);
+        await auditBackend.migrateToSql(newCreated);
+
+        final page = await auditBackend.listRecordsForPublisher(
+          'longago.com',
+          publisherCreatedAt: newCreated.created,
+        );
+        expect(page.records.map((r) => r.recordId), [newCreated.id]);
+      },
+    );
+  });
 }

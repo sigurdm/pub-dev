@@ -2,6 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'package:clock/clock.dart';
+import 'package:pub_dev/account/auth_provider.dart';
+import 'package:pub_dev/fake/backend/fake_auth_provider.dart';
 import 'package:pub_dev/package/models.dart';
 import 'package:pub_dev/publisher/backend.dart';
 import 'package:pub_dev/publisher/models.dart';
@@ -10,6 +13,7 @@ import 'package:pub_dev/tool/test_profile/models.dart';
 import 'package:test/test.dart';
 
 import '../../shared/handlers_test_utils.dart';
+import '../../shared/test_models.dart';
 import '../../shared/test_services.dart';
 import '_utils.dart';
 
@@ -209,9 +213,12 @@ void main() {
             '<li><a href="/packages/pkg_discontinued">pkg_discontinued</a> (discontinued) — <a href="/packages/pkg_discontinued/admin">Admin</a></li>',
             '<li><code>pkg_moderated</code> (moderated)</li>',
             '<li><a href="/packages/pkg_unlisted">pkg_unlisted</a> (unlisted) — <a href="/packages/pkg_unlisted/admin">Admin</a></li>',
-            'Moderated or deleted packages cannot be transferred by publisher members.',
+            'Moderated packages cannot be transferred by publisher members. Appeal the moderation decision or contact pub.dev support if you need assistance.',
           ],
-          absent: ['href="/packages/pkg_moderated/admin"'],
+          absent: [
+            'href="/packages/pkg_moderated/admin"',
+            'Wait for moderation or deletion to complete',
+          ],
         );
       },
     );
@@ -277,6 +284,73 @@ void main() {
             'Packages currently owned by this publisher:',
             'disabled="disabled"',
           ],
+        );
+      },
+    );
+
+    testWithProfile(
+      'publisher admin page note for admin-deleted packages',
+      testProfile: TestProfile(
+        generatedPackages: [
+          GeneratedTestPackage(name: 'pkg_deleted', publisher: 'example.com'),
+        ],
+        defaultUser: 'admin@pub.dev',
+      ),
+      fn: () async {
+        final deleted = await dbService.lookupValue<Package>(
+          dbService.emptyKey.append(Package, id: 'pkg_deleted'),
+        );
+        deleted.isAdminDeleted = true;
+        deleted.adminDeletedAt = clock.now().toUtc();
+        await dbService.commit(inserts: [deleted]);
+
+        final cookies = await acquireSessionCookies('admin@pub.dev');
+        await expectHtmlResponse(
+          await issueGet(
+            '/publishers/example.com/admin',
+            headers: {'cookie': cookies},
+          ),
+          present: [
+            '<li><code>pkg_deleted</code> (deleted)</li>',
+            'Deleted packages cannot be transferred by publisher members and are permanently purged after about two months. Contact pub.dev support if you need assistance.',
+          ],
+          absent: ['href="/packages/pkg_deleted/admin"'],
+        );
+      },
+    );
+
+    testWithProfile(
+      'publisher activity log hides records from before re-registration',
+      testProfile: TestProfile(
+        generatedPackages: [],
+        publishers: [
+          TestPublisher(
+            name: 'verified.com',
+            members: [TestMember(email: 'admin@pub.dev', role: 'admin')],
+          ),
+        ],
+        defaultUser: 'admin@pub.dev',
+      ),
+      fn: () async {
+        final adminClient = await createFakeAuthPubApiClient(
+          email: adminAtPubDevEmail,
+        );
+        await adminClient.deletePublisher('verified.com');
+
+        final newOwnerClient = await createFakeAuthPubApiClient(
+          email: userAtPubDevEmail,
+          scopes: [webmasterScope],
+        );
+        await newOwnerClient.createPublisher('verified.com');
+
+        final cookies = await acquireSessionCookies('user@pub.dev');
+        await expectHtmlResponse(
+          await issueGet(
+            '/publishers/verified.com/activity-log',
+            headers: {'cookie': cookies},
+          ),
+          present: ['<code>user@pub.dev</code> created publisher'],
+          absent: ['admin@pub.dev', 'deleted publisher'],
         );
       },
     );

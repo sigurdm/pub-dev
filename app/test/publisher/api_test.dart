@@ -1049,6 +1049,27 @@ void main() {
               publisherMember(otherUser.userId, 'verified.com', 'admin'),
             ],
           );
+          await publisherBackend.mirrorPublisherToSql('verified.com');
+
+          // Prime caches before deletion.
+          expect(
+            (await publisherBackend.listPublishers()).publishers!.map(
+              (p) => p.publisherId,
+            ),
+            contains('verified.com'),
+          );
+          expect(
+            (await publisherBackend.listPublishersForUser(
+              adminUser.userId,
+            )).publishers!.map((p) => p.publisherId),
+            contains('verified.com'),
+          );
+          expect(
+            (await publisherBackend.listPublishersForUser(
+              otherUser.userId,
+            )).publishers!.map((p) => p.publisherId),
+            contains('verified.com'),
+          );
 
           final client = await createFakeAuthPubApiClient(
             email: adminAtPubDevEmail,
@@ -1056,14 +1077,37 @@ void main() {
           final rs = await client.deletePublisher('verified.com');
           expect(json.fuse(utf8).decode(rs), {'status': 'OK'});
 
-          // Publisher should be gone from Datastore and SQL.
+          // Publisher should be gone from Datastore, SQL, and caches.
           expect(
             await publisherBackend.lookupPublisher('verified.com'),
             isNull,
           );
           await expectPublisherInSqlMatchesDatastore('verified.com');
+          expect(
+            (await publisherBackend.listPublishers()).publishers!.map(
+              (p) => p.publisherId,
+            ),
+            isNot(contains('verified.com')),
+          );
+          expect(
+            (await publisherBackend.listPublishersForUser(
+              adminUser.userId,
+            )).publishers!.map((p) => p.publisherId),
+            isNot(contains('verified.com')),
+          );
+          expect(
+            (await publisherBackend.listPublishersForUser(
+              otherUser.userId,
+            )).publishers!.map((p) => p.publisherId),
+            isNot(contains('verified.com')),
+          );
           await expectApiException(
             client.publisherInfo('verified.com'),
+            status: 404,
+            code: 'NotFound',
+          );
+          await expectApiException(
+            client.deletePublisher('verified.com'),
             status: 404,
             code: 'NotFound',
           );
@@ -1090,6 +1134,43 @@ void main() {
             otherAudit.records.map((e) => e.summary),
             contains('`admin@pub.dev` deleted publisher `verified.com`.'),
           );
+        },
+      );
+
+      testWithProfile(
+        're-registered publisher does not expose prior activity log',
+        testProfile: TestProfile(
+          generatedPackages: [],
+          publishers: [
+            TestPublisher(
+              name: 'verified.com',
+              members: [TestMember(email: 'admin@pub.dev', role: 'admin')],
+            ),
+          ],
+          defaultUser: 'admin@pub.dev',
+        ),
+        fn: () async {
+          final adminClient = await createFakeAuthPubApiClient(
+            email: adminAtPubDevEmail,
+          );
+          await adminClient.deletePublisher('verified.com');
+
+          final newOwnerClient = await createFakeAuthPubApiClient(
+            email: userAtPubDevEmail,
+            scopes: [webmasterScope],
+          );
+          await newOwnerClient.createPublisher('verified.com');
+          final newPublisher = (await publisherBackend.lookupPublisher(
+            'verified.com',
+          ))!;
+
+          final filteredAudit = await auditBackend.listRecordsForPublisher(
+            'verified.com',
+            publisherCreatedAt: newPublisher.createdAt,
+          );
+          expect(filteredAudit.records.map((e) => e.summary).toList(), [
+            '`user@pub.dev` created publisher `verified.com`.',
+          ]);
         },
       );
     });

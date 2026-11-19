@@ -390,14 +390,15 @@ class PublisherBackend {
     }
 
     // Create the publisher
-    final now = clock.now().toUtc();
     final auditLogRecord = await AuditLogRecord.publisherCreated(
       userId: user.userId,
       userEmail: user.email,
       publisherId: publisherId,
     );
+    final now = auditLogRecord.created!;
     var created = false;
     await withRetryTransaction(_db, (tx) async {
+      created = false;
       final key = _publisherKey(publisherId);
       final p = await tx.lookupOrNull<Publisher>(key);
       if (p != null) {
@@ -422,6 +423,7 @@ class PublisherBackend {
             parentKey: _db.emptyKey,
             publisherId: publisherId,
             contactEmail: user.email,
+            created: now,
           ),
           PublisherMember()
             ..parentKey = _publisherKey(publisherId)
@@ -835,6 +837,97 @@ class PublisherBackend {
     return (packages: packages, hasMore: hasMore);
   }
 
+  /// Deletes an empty publisher and all of its member entities.
+  ///
+  /// When [allowUnlisted] is `false`, throws [ModeratedException] or
+  /// [NotFoundException] if the publisher is moderated or abandoned.
+  /// When [onHasPackages] is provided, it is invoked with the list of owned
+  /// package names instead of throwing [ConflictException.publisherHasPackages].
+  ///
+  /// Returns the number of deleted members, or `null` if the publisher did not
+  /// exist.
+  Future<int?> deleteEmptyPublisher(
+    String publisherId, {
+    bool allowUnlisted = false,
+    AuditLogRecord? auditLogRecord,
+    String? actingUserId,
+    Never Function(List<String> packageNames)? onHasPackages,
+  }) async {
+    checkPublisherIdParam(publisherId);
+    final publisherKey = _publisherKey(publisherId);
+    var deleted = false;
+    var memberIds = <String>[];
+    int? memberCount;
+    await withRetryTransaction(_db, (tx) async {
+      deleted = false;
+      memberIds = <String>[];
+      memberCount = null;
+      final publisher = await tx.lookupOrNull<Publisher>(publisherKey);
+      if (publisher == null && !allowUnlisted) {
+        return;
+      }
+      if (publisher != null && !allowUnlisted) {
+        if (publisher.isModerated) {
+          throw ModeratedException.publisher(publisherId);
+        }
+        if (publisher.isAbandoned) {
+          throw NotFoundException('Publisher $publisherId does not exists.');
+        }
+      }
+      // Re-check inside the transaction. Because PackageBackend.setPublisher
+      // and package-publisher-set also modify the Publisher entity in their
+      // transactions, a concurrent transfer into this publisher causes a
+      // Datastore conflict and retries here (or fails after commit).
+      if (onHasPackages != null) {
+        final packages =
+            await (_db.query<Package>()..filter('publisherId =', publisherId))
+                .run()
+                .toList();
+        if (packages.isNotEmpty) {
+          onHasPackages(packages.map((e) => e.name!).toList());
+        }
+      } else if (await hasPackages(publisherId)) {
+        throw ConflictException.publisherHasPackages(publisherId);
+      }
+      final members = await tx
+          .query<PublisherMember>(publisherKey)
+          .run()
+          .toList();
+      if (publisher == null && members.isEmpty) {
+        return;
+      }
+      memberCount = members.length;
+      memberIds = members.map((m) => m.userId!).toList();
+      if (auditLogRecord != null) {
+        auditLogRecord.users = {
+          ...memberIds,
+          if (actingUserId != null) actingUserId,
+        }.toList();
+      }
+      deleted = true;
+      tx.queueMutations(
+        inserts: [if (auditLogRecord != null) auditLogRecord],
+        deletes: [
+          if (publisher != null) publisherKey,
+          ...members.map((m) => m.key),
+        ],
+      );
+    });
+    if (deleted && auditLogRecord != null) {
+      await auditBackend.migrateToSql(auditLogRecord);
+    }
+    await mirrorPublisherToSql(publisherId);
+    await purgePublisherCache(publisherId);
+    await cache.allPublishersPage().purge();
+    for (final userId in {
+      ...memberIds,
+      if (actingUserId != null) actingUserId,
+    }) {
+      await purgeAccountCache(userId: userId);
+    }
+    return memberCount;
+  }
+
   /// Deletes an empty publisher.
   Future<void> deletePublisher(String publisherId) async {
     checkPublisherIdParam(publisherId);
@@ -846,39 +939,19 @@ class PublisherBackend {
       throw ConflictException.publisherHasPackages(publisherId);
     }
 
-    final publisherKey = _publisherKey(publisherId);
-    final memberRows = await _listMemberRows(publisherId);
-    final memberIds = memberRows.map((m) => m.userId).toList();
     final auditLogRecord = await AuditLogRecord.publisherDeleted(
       publisherId: publisherId,
       activeUserId: user.userId,
       activeUserEmail: user.email,
-      memberIds: memberIds,
+      // Populated inside deleteEmptyPublisher's transaction from the live
+      // PublisherMember set so concurrent membership changes are captured.
+      memberIds: const [],
     );
-    var deleted = false;
-    await withRetryTransaction(_db, (tx) async {
-      final publisher = await tx.lookupOrNull<Publisher>(publisherKey);
-      if (publisher == null) {
-        return;
-      }
-      final members = await tx
-          .query<PublisherMember>(publisherKey)
-          .run()
-          .toList();
-      deleted = true;
-      tx.queueMutations(
-        inserts: [auditLogRecord],
-        deletes: [publisherKey, ...members.map((m) => m.key)],
-      );
-    });
-    if (deleted) {
-      await auditBackend.migrateToSql(auditLogRecord);
-    }
-    await mirrorPublisherToSql(publisherId);
-    await purgePublisherCache(publisherId);
-    for (final userId in memberIds) {
-      await purgeAccountCache(userId: userId);
-    }
+    await deleteEmptyPublisher(
+      publisherId,
+      auditLogRecord: auditLogRecord,
+      actingUserId: user.userId,
+    );
   }
 
   /// A callback from consent backend, when a consent is granted.

@@ -26,6 +26,12 @@ const _maxBatchMigrationDuration = Duration(minutes: 8);
 /// [AuditBackend.migrateFromDatastore] will pick it up for SQL migration.
 const _minBatchMigrationAge = Duration(minutes: 1);
 
+/// Grace period subtracted from `Publisher.created` when filtering publisher
+/// activity logs, so `publisher-created` records stamped slightly before
+/// `Publisher.created` (by older code) remain visible unless a
+/// `publisher-deleted` event occurred in that window.
+const _publisherCreatedAuditGracePeriod = Duration(seconds: 10);
+
 final _shortBeforeFormat = RegExp(r'^([0-9]{4})-([0-9]{2})-([0-9]{2})$');
 
 /// Sets the audit backend service.
@@ -46,20 +52,29 @@ class AuditBackend {
   Future<AuditLogRecordPage> _querySql(
     String associationKind,
     String value,
-    DateTime? before,
-  ) async {
+    DateTime? before, {
+    DateTime? after,
+    DateTime? afterExclusive,
+  }) async {
     final cursor = before ?? clock.now().toUtc().add(Duration(minutes: 5));
     // TODO: consider using repeated queries to filter already expired records,
     //       while also making sure that at least one record is on this and on
     //       the next page.
     final rows = await primaryDatabase.withRetry(
       (db) => db.auditLogAssociations
-          .where(
-            (a) =>
+          .where((a) {
+            var expr =
                 a.kind.equalsValue(associationKind) &
                 a.value.equalsValue(value) &
-                (a.recordCreatedAt <= cursor.asExpr),
-          )
+                (a.recordCreatedAt <= cursor.asExpr);
+            if (after != null) {
+              expr = expr & (a.recordCreatedAt >= after.asExpr);
+            }
+            if (afterExclusive != null) {
+              expr = expr & (a.recordCreatedAt > afterExclusive.asExpr);
+            }
+            return expr;
+          })
           .orderBy((a) => [(a.recordCreatedAt, Order.descending)])
           .select((a) => (a.record,))
           .limit(_maxAuditLogBatchSize)
@@ -119,14 +134,51 @@ class AuditBackend {
   }
 
   /// Lists audit log records for [publisherId] in reverse chronological order.
+  ///
+  /// When [publisherCreatedAt] is provided, records from any previous
+  /// registration of [publisherId] are excluded while tolerating small clock
+  /// skew between `publisher-created` and `Publisher.created` for older
+  /// publishers.
   Future<AuditLogRecordPage> listRecordsForPublisher(
     String publisherId, {
     DateTime? before,
+    DateTime? publisherCreatedAt,
   }) async {
+    DateTime? after;
+    DateTime? afterExclusive;
+    if (publisherCreatedAt != null) {
+      final tolerantAfter = publisherCreatedAt.subtract(
+        _publisherCreatedAuditGracePeriod,
+      );
+      final latestDeletion = await primaryDatabase.withRetry(
+        (db) => db.auditLogRecords
+            .join(db.auditLogAssociations)
+            .usingRecord()
+            .where(
+              (r, a) =>
+                  a.kind.equalsValue(AuditLogAssociationKind.publisher) &
+                  a.value.equalsValue(publisherId) &
+                  (a.recordCreatedAt <= publisherCreatedAt.asExpr) &
+                  (a.recordCreatedAt >= tolerantAfter.asExpr) &
+                  r.kind.equalsValue(AuditLogRecordKind.publisherDeleted),
+            )
+            .orderBy((r, a) => [(a.recordCreatedAt, Order.descending)])
+            .select((r, a) => (a.recordCreatedAt,))
+            .first
+            .fetch(),
+      );
+      if (latestDeletion != null) {
+        afterExclusive = latestDeletion;
+      } else {
+        after = tolerantAfter;
+      }
+    }
     return await _querySql(
       AuditLogAssociationKind.publisher,
       publisherId,
       before,
+      after: after,
+      afterExclusive: afterExclusive,
     );
   }
 

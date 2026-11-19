@@ -41,6 +41,7 @@ import '../account/consent_backend.dart';
 import '../audit/backend.dart';
 import '../audit/models.dart';
 import '../publisher/backend.dart';
+import '../publisher/models.dart';
 import '../service/email/backend.dart';
 import '../service/email/email_templates.dart';
 import '../service/email/models.dart';
@@ -1461,16 +1462,36 @@ class PackageBackend {
     String? currentPublisherId;
     AuditLogRecord? auditLogRecord;
     Package? updatedPackage;
+    var updatedPublisher = false;
+    final publisherKey = db.emptyKey.append(Publisher, id: newPublisherId);
     final rs = await withRetryTransaction(db, (tx) async {
+      email = null;
+      currentPublisherId = null;
+      auditLogRecord = null;
+      updatedPackage = null;
+      updatedPublisher = false;
       final package = await tx.lookupValue<Package>(key);
       if (package.publisherId == newPublisherId) {
         // If desired publisherId is already the current publisherId, then we're already done.
         return _asPackagePublisherInfo(package);
       }
+      // Touch the target Publisher entity in the same transaction so a
+      // concurrent empty-publisher deletion conflicts instead of racing.
+      final targetPublisher = await tx.lookupOrNull<Publisher>(publisherKey);
+      if (targetPublisher != null && targetPublisher.isModerated) {
+        throw ModeratedException.publisher(newPublisherId);
+      }
+      if (targetPublisher == null || targetPublisher.isUnlisted) {
+        throw NotFoundException('Publisher $newPublisherId does not exists.');
+      }
+      final now = clock.now().toUtc();
+      targetPublisher.updated = now;
+      tx.insert(targetPublisher);
+      updatedPublisher = true;
       currentPublisherId = package.publisherId;
       package.publisherId = newPublisherId;
       package.uploaders?.clear();
-      package.updated = clock.now().toUtc();
+      package.updated = now;
 
       tx.insert(package);
       updatedPackage = package;
@@ -1499,6 +1520,9 @@ class PackageBackend {
     });
     if (auditLogRecord != null) {
       await auditBackend.migrateToSql(auditLogRecord!);
+    }
+    if (updatedPublisher) {
+      await publisherBackend.mirrorPublisherToSql(newPublisherId);
     }
     if (updatedPackage != null) {
       await mirrorPackageToSql(updatedPackage!);

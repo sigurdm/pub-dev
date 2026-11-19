@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:clock/clock.dart';
-
 import 'package:pub_dev/account/backend.dart';
 import 'package:pub_dev/admin/actions/actions.dart';
 import 'package:pub_dev/audit/backend.dart';
@@ -44,14 +42,15 @@ This should generally only be done with PM approval as it skips actual domain ve
     final user = users.single;
 
     // Create the publisher
-    final now = clock.now().toUtc();
     final auditLogRecord = await AuditLogRecord.publisherCreated(
       userId: user.userId,
       userEmail: user.email,
       publisherId: publisherId,
     );
+    final now = auditLogRecord.created!;
     var created = false;
     await withRetryTransaction(dbService, (tx) async {
+      created = false;
       final key = dbService.emptyKey.append(Publisher, id: publisherId);
       final p = await tx.lookupOrNull<Publisher>(key);
       if (p != null) {
@@ -79,6 +78,7 @@ This should generally only be done with PM approval as it skips actual domain ve
             parentKey: dbService.emptyKey,
             publisherId: publisherId,
             contactEmail: user.email,
+            created: now,
           ),
           PublisherMember()
             ..parentKey = dbService.emptyKey.append(Publisher, id: publisherId)

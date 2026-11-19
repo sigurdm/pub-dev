@@ -214,6 +214,7 @@ Future<shelf.Response> publisherActivityLogPageHandler(
   final activities = await auditBackend.listRecordsForPublisher(
     publisherId,
     before: before,
+    publisherCreatedAt: publisher.createdAt,
   );
   return htmlResponse(
     renderPublisherActivityLogPage(

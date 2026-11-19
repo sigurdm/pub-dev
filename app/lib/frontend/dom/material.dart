@@ -22,6 +22,7 @@ d.Node button({
       'pub-button',
       if (raised) 'pub-button--raised',
       if (unelevated) 'pub-button--unelevated',
+      if (disabled) 'pub-button--disabled',
       ...?classes,
     ],
     attributes: {if (disabled) 'disabled': 'disabled', ...?attributes},

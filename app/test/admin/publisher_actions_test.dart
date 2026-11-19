@@ -71,6 +71,12 @@ void main() {
         final p1 = await publisherBackend.lookupPublisher('other.com');
         expect(p1, isNotNull);
         await expectPublisherInSqlMatchesDatastore('other.com');
+        // Prime allPublishersPage cache before deletion.
+        final listedBefore = await publisherBackend.listPublishers();
+        expect(
+          listedBefore.publishers!.map((p) => p.publisherId),
+          contains('other.com'),
+        );
         final rs2 = await client.adminInvokeAction(
           'publisher-delete',
           AdminInvokeActionArguments(arguments: {'publisher': 'other.com'}),
@@ -83,6 +89,11 @@ void main() {
         final p2 = await publisherBackend.lookupPublisher('other.com');
         expect(p2, isNull);
         await expectPublisherInSqlMatchesDatastore('other.com');
+        final listedAfter = await publisherBackend.listPublishers();
+        expect(
+          listedAfter.publishers!.map((p) => p.publisherId),
+          isNot(contains('other.com')),
+        );
       },
     );
 

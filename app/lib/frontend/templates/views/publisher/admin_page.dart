@@ -20,7 +20,8 @@ d.Node publisherAdminPageNode({
   required bool hasMorePackages,
 }) {
   final hasPackages = packages.isNotEmpty || hasMorePackages;
-  final hasNonVisiblePackages = packages.any((p) => p.isNotVisible);
+  final hasModeratedPackages = packages.any((p) => p.isModerated);
+  final hasDeletedPackages = packages.any((p) => p.isAdminDeleted);
   return d.fragment([
     d.h2(text: 'Publisher information'),
     d.div(
@@ -146,8 +147,8 @@ d.Node publisherAdminPageNode({
           d.text(' (you can '),
           d.a(href: urls.createPublisherUrl(), text: 'create a new publisher'),
           d.text(
-            ' if needed; packages cannot be converted back to legacy uploader '
-            'ownership).',
+            ' if needed; self-service transfer back to legacy uploader '
+            'ownership is not supported — contact pub.dev support if needed).',
           ),
         ],
       ),
@@ -174,12 +175,27 @@ d.Node publisherAdminPageNode({
             d.text('.'),
           ],
         ),
-      if (hasNonVisiblePackages)
+      if (hasModeratedPackages && hasDeletedPackages)
         d.p(
           text:
               'Moderated or deleted packages cannot be transferred by '
-              'publisher members. Wait for moderation or deletion to '
-              'complete, or contact pub.dev support if you need assistance.',
+              'publisher members. Deleted packages are permanently purged '
+              'after about two months; for moderated packages, appeal the '
+              'moderation decision or contact pub.dev support.',
+        )
+      else if (hasModeratedPackages)
+        d.p(
+          text:
+              'Moderated packages cannot be transferred by publisher members. '
+              'Appeal the moderation decision or contact pub.dev support if '
+              'you need assistance.',
+        )
+      else if (hasDeletedPackages)
+        d.p(
+          text:
+              'Deleted packages cannot be transferred by publisher members '
+              'and are permanently purged after about two months. Contact '
+              'pub.dev support if you need assistance.',
         ),
     ] else
       d.p(

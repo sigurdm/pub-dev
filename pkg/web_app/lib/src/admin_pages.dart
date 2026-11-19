@@ -576,10 +576,6 @@ class _PublisherAdminWidget {
   }
 
   Future<void> _deletePublisher() async {
-    if (_deleteButton is HTMLButtonElement &&
-        (_deleteButton as HTMLButtonElement).disabled) {
-      return;
-    }
     final publisherId = pageData.publisher!.publisherId;
     await api_client.rpc<void>(
       confirmQuestion:

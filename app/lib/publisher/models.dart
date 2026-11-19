@@ -65,11 +65,12 @@ class Publisher extends db.ExpandoModel<String> {
     required db.Key parentKey,
     required String publisherId,
     required this.contactEmail,
+    DateTime? created,
   }) {
-    final now = clock.now().toUtc();
+    final now = created ?? clock.now().toUtc();
     this.parentKey = parentKey;
     id = publisherId;
-    created = now;
+    this.created = now;
     updated = now;
     description = '';
     websiteUrl = defaultPublisherWebsite(publisherId);

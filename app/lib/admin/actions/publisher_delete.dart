@@ -2,12 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:pub_dev/account/backend.dart';
 import 'package:pub_dev/admin/actions/actions.dart';
-import 'package:pub_dev/package/models.dart';
 import 'package:pub_dev/publisher/backend.dart';
-import 'package:pub_dev/publisher/models.dart';
-import 'package:pub_dev/shared/datastore.dart';
 
 final publisherDelete = AdminAction(
   name: 'publisher-delete',
@@ -28,43 +24,21 @@ The publisher can be regenerated later (no tombstoning).
       throw InvalidInputException('Missing `publisher` argument');
     }
 
-    final packagesQuery = dbService.query<Package>()
-      ..filter('publisherId =', publisherId);
-    final packages = await packagesQuery.run().toList();
-    if (packages.isNotEmpty) {
-      throw NotAcceptableException(
-        'Publisher "$publisherId" cannot be deleted, as it has package(s): '
-        '${packages.map((e) => e.name!).join(', ')}.',
-      );
-    }
-
-    int? memberCount;
-    final memberIds = <String>[];
-    await withRetryTransaction(dbService, (tx) async {
-      final key = dbService.emptyKey.append(Publisher, id: publisherId);
-      final publisher = await tx.lookupOrNull<Publisher>(key);
-      final membersQuery = tx.query<PublisherMember>(key);
-      final members = await membersQuery.run().toList();
-      memberCount = members.length;
-      if (publisher != null) {
-        tx.delete(key);
-      }
-      for (final m in members) {
-        memberIds.add(m.userId!);
-        tx.delete(m.key);
-      }
-    });
-
-    await publisherBackend.mirrorPublisherToSql(publisherId);
-    await purgePublisherCache(publisherId);
-    for (final userId in memberIds) {
-      await purgeAccountCache(userId: userId);
-    }
+    final memberCount = await publisherBackend.deleteEmptyPublisher(
+      publisherId,
+      allowUnlisted: true,
+      onHasPackages: (packageNames) {
+        throw NotAcceptableException(
+          'Publisher "$publisherId" cannot be deleted, as it has package(s): '
+          '${packageNames.join(', ')}.',
+        );
+      },
+    );
 
     return {
       'message': 'Publisher and all members deleted.',
       'publisherId': publisherId,
-      'members-count': memberCount,
+      'members-count': memberCount ?? 0,
     };
   },
 );

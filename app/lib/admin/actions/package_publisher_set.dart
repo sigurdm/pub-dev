@@ -7,6 +7,7 @@ import 'package:pub_dev/database/schema.dart';
 import 'package:pub_dev/package/backend.dart';
 import 'package:pub_dev/package/models.dart';
 import 'package:pub_dev/publisher/backend.dart';
+import 'package:pub_dev/publisher/models.dart';
 import 'package:pub_dev/shared/datastore.dart';
 
 import 'actions.dart';
@@ -33,19 +34,32 @@ final packagePublisherSet = AdminAction(
     final package = (await packageBackend.lookupPackage(packageName))!;
     final publisher = await publisherBackend.lookupPublisher(publisherId);
     if (publisher == null || !publisher.isVisible) {
-      InvalidInputException(
+      throw InvalidInputException(
         'Publisher `$publisherId` does not exists or is not visible.',
       );
     }
     final currentPublisherId = package.publisherId;
     if (currentPublisherId != publisherId) {
+      final publisherKey = dbService.emptyKey.append(
+        Publisher,
+        id: publisherId,
+      );
       final updated = await withRetryTransaction(dbService, (tx) async {
+        final targetPublisher = await tx.lookupOrNull<Publisher>(publisherKey);
+        if (targetPublisher == null || !targetPublisher.isVisible) {
+          throw InvalidInputException(
+            'Publisher `$publisherId` does not exists or is not visible.',
+          );
+        }
+        final now = clock.now().toUtc();
+        targetPublisher.updated = now;
         final pkg = await tx.lookupValue<Package>(package.key);
         pkg.publisherId = publisherId;
-        pkg.updated = clock.now().toUtc();
-        tx.insert(pkg);
+        pkg.updated = now;
+        tx.queueMutations(inserts: [targetPublisher, pkg]);
         return pkg;
       });
+      await publisherBackend.mirrorPublisherToSql(publisherId);
       await packageBackend.mirrorPackageToSql(updated);
       await purgePublisherCache(publisherId);
       triggerPackagePostUpdates(
